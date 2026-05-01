@@ -54,14 +54,14 @@ async def check_stream():
 
     if live and not was_live:
         embed = discord.Embed(
-            title=":fire: 방송 시작!",
+            title=":fire: Yong님 방송 시작!",
             description="지금 바로 시청하러 가기",
             color=0x5865F2
         )
         embed.add_field(name=":link: 링크", value=SOOP_URL, inline=False)
 
         await channel.send(
-            content="@everyone :fire: 방송 시작!",
+            content="@everyone :fire: Yong Streaming ON!",
             embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=True)
         )
