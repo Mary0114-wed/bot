@@ -2,8 +2,6 @@ import discord
 from discord.ext import commands, tasks
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask
-from threading import Thread
 import os
 
 TOKEN = os.environ.get("TOKEN")
@@ -15,49 +13,21 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 was_live = False
 
-# :fire: 서버 유지용 (Railway용)
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "alive"
-
-def run():
-    port = int(os.environ.get("PORT", 8080))  # :fire: 핵심 수정
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# :fire: 방송 상태 체크 (안정 버전)
 def is_live():
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(SOOP_URL, headers=headers, timeout=10)
-
-        if res.status_code != 200:
-            print("페이지 요청 실패:", res.status_code)
-            return False
-
+        res = requests.get(SOOP_URL, headers=headers)
         soup = BeautifulSoup(res.text, "html.parser")
 
-        # :one: 썸네일 확인
-        og_image = soup.find("meta", property="og:image")
-        img_url = og_image.get("content", "") if og_image else ""
+        # :fire: 메타 태그 기반 체크 (썸네일 낚시 방지)
+        meta_title = soup.find("meta", property="og:title")
 
-        # :two: 텍스트 확인
-        text = soup.get_text()
-
-        print("이미지 URL:", img_url)
-        print("LIVE 포함 여부:", "LIVE" in text or "방송" in text)
-
-        # :fire: 이중 체크
-        if "liveimg" in img_url and ("LIVE" in text or "방송" in text):
-            return True
+        if meta_title:
+            content = meta_title.get("content", "")
+            print("현재 제목:", content)
+            return "LIVE" in content or "방송중" in content
 
         return False
-
     except Exception as e:
         print("에러:", e)
         return False
@@ -82,17 +52,16 @@ async def check_stream():
     live = is_live()
     print("현재 방송 상태:", live)
 
-    # :fire: 방송 시작 감지
     if live and not was_live:
         embed = discord.Embed(
-            title=":fire: 용님 방송 시작!",
+            title=":fire: 방송 시작!",
             description="지금 바로 시청하러 가기",
             color=0x5865F2
         )
         embed.add_field(name=":link: 링크", value=SOOP_URL, inline=False)
 
         await channel.send(
-            content="@everyone :fire: Streaming ON!",
+            content="@everyone :fire: 방송 시작!",
             embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=True)
         )
@@ -100,6 +69,4 @@ async def check_stream():
     was_live = live
 
 
-# :fire: 실행
-keep_alive()
 bot.run(TOKEN)
