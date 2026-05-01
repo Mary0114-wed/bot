@@ -5,7 +5,7 @@ import os
 import time
 import asyncio
 
-TOKEN = os.environ.get("TOKEN")  # 또는 직접 넣어도 됨
+TOKEN = os.environ.get("TOKEN")  # 또는 "봇토큰"
 CHANNEL_ID = 1488515807892738151
 BJ_ID = "kkcy2445"
 
@@ -31,7 +31,11 @@ def is_live():
                 continue
 
             data = res.json()
-            status = data.get("broad_status")
+            print("전체 데이터:", data)  # :mag: 구조 확인용
+
+            # :fire: 핵심 수정 부분
+            channel = data.get("CHANNEL", {})
+            status = channel.get("BROAD_STATUS")
 
             print("현재 상태:", status)
 
@@ -56,7 +60,7 @@ async def on_ready():
     check_stream.start()
     print(":fire: 루프 시작됨")
 
-    # :fire: 컨테이너 종료 방지용 루프
+    # :fire: 컨테이너 종료 방지
     while True:
         await asyncio.sleep(60)
 
