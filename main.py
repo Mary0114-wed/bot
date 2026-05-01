@@ -15,7 +15,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 was_live = False
 
-# :fire: 서버 유지용
+# :fire: 서버 유지용 (Railway용)
 app = Flask('')
 
 @app.route('/')
@@ -23,13 +23,14 @@ def home():
     return "alive"
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))  # :fire: 핵심 수정
+    app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run)
     t.start()
 
-# :fire: 방송 상태 체크 (강화 버전)
+# :fire: 방송 상태 체크 (안정 버전)
 def is_live():
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -51,7 +52,7 @@ def is_live():
         print("이미지 URL:", img_url)
         print("LIVE 포함 여부:", "LIVE" in text or "방송" in text)
 
-        # :fire: 조건 2개 이상 만족해야 True
+        # :fire: 이중 체크
         if "liveimg" in img_url and ("LIVE" in text or "방송" in text):
             return True
 
@@ -91,7 +92,7 @@ async def check_stream():
         embed.add_field(name=":link: 링크", value=SOOP_URL, inline=False)
 
         await channel.send(
-            content="@everyone :fire: Yong Streaming ON!",
+            content="@everyone :fire: Streaming ON!",
             embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=True)
         )
@@ -99,5 +100,6 @@ async def check_stream():
     was_live = live
 
 
+# :fire: 실행
 keep_alive()
 bot.run(TOKEN)
