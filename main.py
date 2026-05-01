@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands, tasks
 import requests
 import os
-import time
 import asyncio
 
 TOKEN = os.environ.get("TOKEN")  # 또는 "봇토큰"
@@ -12,74 +11,59 @@ BJ_ID = "kkcy2445"
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-was_live = False
+last_broad_start = ""  # :fire: 핵심
 
 
-def is_live():
+def get_broadcast_start():
     url = "https://st.sooplive.com/api/get_station_status.php"
     params = {"szBjId": BJ_ID}
     headers = {"User-Agent": "Mozilla/5.0"}
 
-    for i in range(3):
-        try:
-            res = requests.get(url, params=params, headers=headers, timeout=10)
+    try:
+        res = requests.get(url, params=params, headers=headers, timeout=10)
+        data = res.json()
 
-            print(f"[API 응답 코드]: {res.status_code}")
+        info = data.get("DATA", {})
+        broad_start = info.get("broad_start", "")
 
-            if res.status_code != 200:
-                time.sleep(1)
-                continue
+        print("broad_start:", broad_start)
 
-            data = res.json()
-            print("전체 데이터:", data)  # :mag: 구조 확인용
+        return broad_start
 
-            # :fire: 핵심 수정 부분
-            channel = data.get("CHANNEL", {})
-            status = channel.get("BROAD_STATUS")
-
-            print("현재 상태:", status)
-
-            return status == "ON"
-
-        except Exception as e:
-            print(f"[에러 {i+1}]:", e)
-            time.sleep(1)
-
-    return False
+    except Exception as e:
+        print("에러:", e)
+        return ""
 
 
 @bot.event
 async def on_ready():
-    global was_live
-    print(":fire: on_ready 실행됨")
+    global last_broad_start
+
     print(f"{bot.user} 로그인 완료!")
 
-    was_live = is_live()
-    print("초기 상태:", was_live)
+    # :fire: 현재 상태 저장 (중복 알림 방지)
+    last_broad_start = get_broadcast_start()
 
     check_stream.start()
-    print(":fire: 루프 시작됨")
 
-    # :fire: 컨테이너 종료 방지
+    # :fire: 컨테이너 유지
     while True:
         await asyncio.sleep(60)
 
 
 @tasks.loop(seconds=20)
 async def check_stream():
-    global was_live
-
-    print(":arrows_counterclockwise: 체크 실행됨")
+    global last_broad_start
 
     channel = bot.get_channel(CHANNEL_ID)
-
     if channel is None:
-        print(":x: 채널 못 찾음")
+        print("채널 못 찾음")
         return
 
-    live = is_live()
+    current_start = get_broadcast_start()
 
-    if live and not was_live:
+    # :fire: 방송 새로 시작 감지
+    if current_start and current_start != last_broad_start:
         print(":rotating_light: 방송 시작 감지!")
 
         embed = discord.Embed(
@@ -102,7 +86,8 @@ async def check_stream():
 
         print(":white_check_mark: 알림 보냄!")
 
-    was_live = live
+    # :fire: 상태 업데이트
+    last_broad_start = current_start
 
 
 bot.run(TOKEN)
