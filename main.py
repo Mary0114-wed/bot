@@ -4,26 +4,25 @@ import requests
 import os
 import json
 import time
-from datetime import datetime, timedelta
 
 TOKEN = os.environ.get("TOKEN")
-CHANNEL_ID = 1488515807892738151
+CHANNEL_ID = 1491439774173499553
 BJ_ID = "kkcy2445"
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# =========================
-# 🔥 상태 저장
-# =========================
 STATE_FILE = "stream_state.json"
 
+# =========================
+# 🔥 상태 로딩
+# =========================
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {
             "live": False,
-            "last_start": "",
-            "last_event_time": 0
+            "last_broad_start": "",
+            "last_event": 0
         }
     with open(STATE_FILE, "r") as f:
         return json.load(f)
@@ -35,15 +34,6 @@ def save_state(state):
 state = load_state()
 
 # =========================
-# 🔥 안정화 변수
-# =========================
-candidate = None
-confirm_count = 0
-
-off_since = None
-OFF_CONFIRM_SEC = 180  # 3분 OFF 유지
-
-# =========================
 # 🔥 API
 # =========================
 def fetch_broad_start():
@@ -52,7 +42,7 @@ def fetch_broad_start():
     headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        res = requests.get(url, params=params, headers=headers, timeout=10)
+        res = requests.get(url, params=params, timeout=10)
         data = res.json()
         return data.get("DATA", {}).get("broad_start", "")
     except:
@@ -60,31 +50,24 @@ def fetch_broad_start():
 
 
 # =========================
-# 🔥 핵심 LIVE 판정 (오탐 방지 핵심)
+# 🔥 핵심 판단 로직 (진짜 중요)
 # =========================
-def is_real_live(broad_start):
+def detect_state(broad_start, last_start, prev_live):
+    """
+    TRUE = LIVE
+    FALSE = OFF
+    """
+
+    # OFF 조건
     if not broad_start:
         return False
 
-    try:
-        start = datetime.strptime(broad_start, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-
-        diff = now - start
-
-        # 🔥 너무 오래된 start = 잔상 제거
-        if diff > timedelta(hours=12):
-            return False
-
-        # 🔥 최근 시작만 LIVE 인정
-        if diff < timedelta(seconds=30):
-            return True
-
-        # 🔥 기본 유지 조건
+    # 방송 새로 시작된 경우만 LIVE
+    if broad_start != last_start:
         return True
 
-    except:
-        return False
+    # 기존 상태 유지
+    return prev_live
 
 
 # =========================
@@ -101,56 +84,35 @@ async def on_ready():
 # =========================
 @tasks.loop(seconds=15)
 async def stream_loop():
-    global candidate, confirm_count, off_since, state
+    global state
 
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
         return
 
     broad_start = fetch_broad_start()
-    live = is_real_live(broad_start)
 
-    now = time.time()
-
-    # =========================
-    # 🔥 OFF 안정화 (3분 유지)
-    # =========================
-    if not live:
-        if off_since is None:
-            off_since = now
-            return
-
-        if now - off_since < OFF_CONFIRM_SEC:
-            return
-
-    else:
-        off_since = None
-
+    prev_live = state["live"]
+    last_start = state["last_broad_start"]
 
     # =========================
-    # 🔥 3회 연속 확인 (API 흔들림 제거)
+    # 🔥 상태 판단
     # =========================
-    if candidate != live:
-        candidate = live
-        confirm_count = 1
-        return
+    live = detect_state(broad_start, last_start, prev_live)
 
-    confirm_count += 1
-    if confirm_count < 3:
+    # =========================
+    # 🔥 변화 없으면 종료
+    # =========================
+    if live == prev_live:
         return
 
 
     # =========================
-    # 🔥 상태 변화 없으면 종료
-    # =========================
-    if state["live"] == live:
-        return
-
-
-    # =========================
-    # 🔥 상태 확정
+    # 🔥 상태 업데이트
     # =========================
     state["live"] = live
+    state["last_broad_start"] = broad_start
+    state["last_event"] = time.time()
     save_state(state)
 
 
@@ -158,19 +120,11 @@ async def stream_loop():
     # 🔥 LIVE ON
     # =========================
     if live:
-        # 같은 방송이면 중복 차단
-        if state["last_start"] == broad_start:
-            return
-
-        state["last_start"] = broad_start
-        state["last_event_time"] = now
-        save_state(state)
-
-        print("🚨 방송 시작 확정")
+        print("🚨 방송 시작 이벤트")
 
         embed = discord.Embed(
             title="🔥 방송 시작!",
-            description="방송 시청 하러가기",
+            description="지금 시청 가능합니다",
             color=0x5865F2
         )
 
@@ -180,18 +134,14 @@ async def stream_loop():
             inline=False
         )
 
-        await channel.send(
-            "@everyone 🔥 LIVE ON!",
-            embed=embed,
-            allowed_mentions=discord.AllowedMentions(everyone=True)
-        )
+        await channel.send("@everyone 🔥 LIVE ON!", embed=embed)
 
 
     # =========================
     # 🔥 OFF
     # =========================
     else:
-        print("🛑 방송 종료 확정")
+        print("🛑 방송 종료 이벤트")
 
         embed = discord.Embed(
             title="🛑 방송 종료",
