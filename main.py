@@ -6,7 +6,7 @@ import json
 import time
 
 TOKEN = os.environ.get("TOKEN")
-CHANNEL_ID = 1491439774173499553
+CHANNEL_ID = 1488515807892738151
 BJ_ID = "kkcy2445"
 
 intents = discord.Intents.default()
