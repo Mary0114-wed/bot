@@ -3,7 +3,8 @@ from discord.ext import commands, tasks
 import requests
 import os
 import asyncio
-from datetime import datetime, timedelta
+import json
+import time
 
 TOKEN = os.environ.get("TOKEN")
 CHANNEL_ID = 1491439774173499553
@@ -12,10 +13,40 @@ BJ_ID = "kkcy2445"
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-last_broad_start = ""
-was_live = False
+# =========================
+# 🔥 상태 저장 파일
+# =========================
+STATE_FILE = "stream_state.json"
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {
+            "live": False,
+            "notified_start": "",
+        }
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 
+state = load_state()
+
+# =========================
+# 🔥 안정화 변수
+# =========================
+candidate_live = None
+confirm_count = 0
+
+off_since = None
+OFF_CONFIRM_SECONDS = 120  # 🔥 2분 유지 후 OFF 확정
+
+
+# =========================
+# 🔥 API
+# =========================
 def get_broadcast_start():
     url = "https://st.sooplive.com/api/get_station_status.php"
     params = {"szBjId": BJ_ID}
@@ -26,109 +57,129 @@ def get_broadcast_start():
         data = res.json()
 
         info = data.get("DATA", {})
-        broad_start = info.get("broad_start", "")
-
-        print("broad_start:", broad_start)
-
-        return broad_start
+        return info.get("broad_start", "")
 
     except Exception as e:
-        print("에러:", e)
+        print("API 에러:", e)
         return ""
 
 
 def is_live(broad_start):
-    if not broad_start:
-        return False
-
-    try:
-        start_time = datetime.strptime(broad_start, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now()
-
-        diff = now - start_time
-        print("방송 경과 시간:", diff)
-
-        # :fire: 24시간 기준 (길게 잡아서 오탐 최소화)
-        if diff > timedelta(hours=24):
-            return False
-
-        return True
-
-    except Exception as e:
-        print("시간 파싱 에러:", e)
-        return False
+    return bool(broad_start)
 
 
+# =========================
+# 🔥 시작
+# =========================
 @bot.event
 async def on_ready():
-    global last_broad_start, was_live
-
     print(f"{bot.user} 로그인 완료!")
-
-    last_broad_start = get_broadcast_start()
-    was_live = is_live(last_broad_start)
-
-    print("초기 상태:", was_live)
-
-    check_stream.start()
-
-    while True:
-        await asyncio.sleep(60)
+    stream_check.start()
 
 
-@tasks.loop(seconds=20)
-async def check_stream():
-    global last_broad_start, was_live
+# =========================
+# 🔥 메인 루프
+# =========================
+@tasks.loop(seconds=15)
+async def stream_check():
+    global candidate_live, confirm_count, off_since, state
 
     channel = bot.get_channel(CHANNEL_ID)
-    if channel is None:
-        print("채널 못 찾음")
+    if not channel:
         return
 
-    current_start = get_broadcast_start()
-    live = is_live(current_start)
+    broad_start = get_broadcast_start()
+    live = is_live(broad_start)
 
-    # :fire: 방송 시작 감지
-    if live and (not was_live or current_start != last_broad_start):
-        print(":rotating_light: 방송 시작 감지!")
+    now = time.time()
+
+    # =========================
+    # 🔥 1. OFF 쿨다운 처리 (핵심)
+    # =========================
+    if not live:
+        if off_since is None:
+            off_since = now
+            return
+
+        # 2분 미만이면 아직 OFF 아님
+        if now - off_since < OFF_CONFIRM_SECONDS:
+            return
+
+    else:
+        off_since = None
+
+
+    # =========================
+    # 🔥 2. 3회 연속 확인 (API 흔들림 제거)
+    # =========================
+    if candidate_live != live:
+        candidate_live = live
+        confirm_count = 1
+        return
+
+    confirm_count += 1
+    if confirm_count < 3:
+        return
+
+
+    # =========================
+    # 🔥 3. 상태 변화 없으면 종료
+    # =========================
+    if state["live"] == live:
+        return
+
+
+    # =========================
+    # 🔥 4. 상태 확정
+    # =========================
+    state["live"] = live
+    save_state(state)
+
+
+    # =========================
+    # 🔥 LIVE ON (완전 중복 방지)
+    # =========================
+    if live:
+        if state["notified_start"] == broad_start:
+            return
+
+        state["notified_start"] = broad_start
+        save_state(state)
+
+        print("🚨 방송 시작 확정")
 
         embed = discord.Embed(
-            title=":fire: Yong님 방송 시작!",
-            description="지금 바로 시청하러 가기",
+            title="🔥 방송 시작!",
+            description="지금 시청 가능합니다",
             color=0x5865F2
         )
 
         embed.add_field(
-            name=":link: 링크",
-            value="<https://www.sooplive.com/station/kkcy2445>",
+            name="🔗 링크",
+            value="https://www.sooplive.com/station/kkcy2445",
             inline=False
         )
 
         await channel.send(
-            content="@everyone :fire: Yong Streaming ON!",
+            "@everyone 🔥 LIVE ON!",
             embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=True)
         )
 
-        print(":white_check_mark: 시작 알림 보냄!")
 
-    # :fire: 방송 종료 감지
-    if not live and was_live:
-        print(":octagonal_sign: 방송 종료 감지!")
+    # =========================
+    # 🔥 OFF (지연 방지 완료)
+    # =========================
+    else:
+        print("🛑 방송 종료 확정")
 
         embed = discord.Embed(
-            title=":octagonal_sign: Yong님 방송 종료",
+            title="🛑 방송 종료",
             description="방송이 종료되었습니다",
             color=0xFF3B30
         )
 
         await channel.send(embed=embed)
-
-        print(":white_check_mark: 종료 알림 보냄!")
-
-    # 상태 업데이트
-    was_live = live
-    last_broad_start = current_start
 
 
 bot.run(TOKEN)
